@@ -74,6 +74,13 @@ void message_widget(struct nk_context *ctx, char *user_name, char *message) {
   nk_label(ctx, message, NK_TEXT_LEFT);
 }
 
+void copy_string(char *dest, int dest_len, char *src, int src_len) {
+  int len = dest_len > src_len ? src_len : dest_len;
+  for (int i = 0; i < len; ++i) {
+    dest[i] = src[i];
+  }
+}
+
 /* ===============================================================
  *
  *                          DEMO
@@ -141,6 +148,8 @@ int main(int argc, char *argv[]) {
 
     int current_user = 0;
 
+    int first_scroll = 1;
+
     bg.r = 0.10f, bg.g = 0.18f, bg.b = 0.24f, bg.a = 1.0f;
     while (running) {
       /* Input */
@@ -164,12 +173,17 @@ int main(int argc, char *argv[]) {
         snprintf(user_messages[i], 40, "%s msg#%d", users[i], i + 1);
       }
 
+      char current_message[40];
+      int actual_length;
+      
+      char approved_message[40];
+
       /* GUI */
       if (nk_begin(ctx, "skibidi main window",
                    nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
                    NK_WINDOW_BORDER)) {
         float ratio[] = {0.1f, 0.35, 0.55f};
-        nk_layout_row(ctx, NK_DYNAMIC, 10 * 30, 3, ratio);
+        nk_layout_row(ctx, NK_DYNAMIC, 20 * 30, 3, ratio);
         if (nk_group_begin(ctx, "groups", 0)) {
            
           nk_group_end(ctx);
@@ -179,22 +193,45 @@ int main(int argc, char *argv[]) {
           for (int i = 0; i < 5; ++i) {
             if (nk_button_label(ctx, users[i])) {
               current_user = i;
+              first_scroll = 1;
             }
           }
+          nk_text(ctx, current_message, actual_length, NK_TEXT_LEFT);
           nk_group_end(ctx);
         }
-        if (nk_group_begin(ctx, "messages", 0)) {
+        if (nk_group_begin(ctx, "messages panel", NK_WINDOW_NO_SCROLLBAR)) {
           nk_layout_row_dynamic(ctx, 50, 1);
           if (nk_group_begin(ctx, "user header", NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
             nk_layout_row_dynamic(ctx, 50, 1);
             nk_label(ctx, users[current_user], NK_TEXT_LEFT);
             nk_group_end(ctx);
           }
-          
-          nk_layout_row_dynamic(ctx, 30, 1);
-          for (int i = 0; i < 10; ++i) {
-            message_widget(ctx, users[current_user],
-                           user_messages[current_user]);
+
+          nk_layout_row_dynamic(ctx, 13 * 30, 1);
+          if (nk_group_begin(ctx, "messages", 0)) {
+            if (first_scroll) {
+              nk_group_set_scroll(ctx, "messages", 0, 13 * 30);
+              first_scroll = 0;
+            }
+            nk_layout_row_dynamic(ctx, 30, 1);
+            for (int i = 0; i < 10; ++i) {
+              message_widget(ctx, users[current_user],
+                             user_messages[current_user]);
+            }
+            nk_group_end(ctx);
+          }
+
+          if (nk_group_begin(ctx, "message_field", 0)) {
+            float ratio[] = {0.9f, 0.1f};
+            nk_layout_row(ctx, NK_DYNAMIC, 30, 2, ratio);
+            nk_edit_string(ctx, NK_EDIT_FIELD, current_message,
+                           &actual_length, 40, nk_filter_default);
+            if (nk_button_label(ctx, "Send")) {
+              copy_string(approved_message, 40, current_message, 40);
+              memset(current_message, 0, 40);
+              actual_length = 0;
+            }
+            nk_group_end(ctx);
           }
           nk_group_end(ctx);
         }

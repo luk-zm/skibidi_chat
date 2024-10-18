@@ -1,13 +1,11 @@
 /* nuklear - 1.32.0 - public domain */
 #include <assert.h>
 #include <limits.h>
-#include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include <GL/glew.h>
 #include <SDL2/SDL.h>
@@ -31,43 +29,7 @@
 #define MAX_VERTEX_MEMORY 512 * 1024
 #define MAX_ELEMENT_MEMORY 128 * 1024
 
-/* ===============================================================
- *
- *                          EXAMPLE
- *
- * ===============================================================*/
-/* This are some code examples to provide a small overview of what can be
- * done with this library. To try out an example uncomment the defines */
-/*#define INCLUDE_ALL */
-/*#define INCLUDE_STYLE */
-/*#define INCLUDE_CALCULATOR */
-/*#define INCLUDE_CANVAS */
-/*#define INCLUDE_OVERVIEW */
-/*#define INCLUDE_NODE_EDITOR */
-
-#ifdef INCLUDE_ALL
-#define INCLUDE_STYLE
-#define INCLUDE_CALCULATOR
-#define INCLUDE_CANVAS
-#define INCLUDE_OVERVIEW
-#define INCLUDE_NODE_EDITOR
-#endif
-
-#ifdef INCLUDE_STYLE
-#include "../../demo/common/style.c"
-#endif
-#ifdef INCLUDE_CALCULATOR
-#include "../../demo/common/calculator.c"
-#endif
-#ifdef INCLUDE_CANVAS
-#include "../../demo/common/canvas.c"
-#endif
-#ifdef INCLUDE_OVERVIEW
-#include "../../demo/common/overview.c"
-#endif
-#ifdef INCLUDE_NODE_EDITOR
-#include "../../demo/common/node_editor.c"
-#endif
+#define MESSAGE_LENGTH 128
 
 void message_widget(struct nk_context *ctx, char *user_name, char *message) {
   nk_label(ctx, user_name, NK_TEXT_LEFT);
@@ -81,11 +43,6 @@ void copy_string(char *dest, int dest_len, char *src, int src_len) {
   }
 }
 
-/* ===============================================================
- *
- *                          DEMO
- *
- * ===============================================================*/
 int main(int argc, char *argv[]) {
   /* Platform */
   SDL_Window *win;
@@ -151,6 +108,22 @@ int main(int argc, char *argv[]) {
     int first_scroll = 1;
 
     bg.r = 0.10f, bg.g = 0.18f, bg.b = 0.24f, bg.a = 1.0f;
+
+    char users[10][20];
+    for (int i = 0; i < 10; ++i) {
+      snprintf(users[i], 20, "skbd_user#%d", i + 1);
+    }
+
+    char user_messages[10][MESSAGE_LENGTH];
+    for (int i = 0; i < 10; ++i) {
+      snprintf(user_messages[i], MESSAGE_LENGTH, "%s msg#%d", users[i], i + 1);
+    }
+
+    char current_message[MESSAGE_LENGTH];
+    int actual_length = 0;
+    
+    char approved_message[MESSAGE_LENGTH];
+
     while (running) {
       /* Input */
       SDL_Event evt;
@@ -163,27 +136,12 @@ int main(int argc, char *argv[]) {
       nk_sdl_handle_grab(); /* optional grabbing behavior */
       nk_input_end(ctx);
 
-      char users[10][20];
-      for (int i = 0; i < 10; ++i) {
-        snprintf(users[i], 20, "skbd_user#%d", i + 1);
-      }
-
-      char user_messages[10][40];
-      for (int i = 0; i < 10; ++i) {
-        snprintf(user_messages[i], 40, "%s msg#%d", users[i], i + 1);
-      }
-
-      char current_message[40];
-      int actual_length;
-      
-      char approved_message[40];
-
       /* GUI */
       if (nk_begin(ctx, "skibidi main window",
                    nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
-                   NK_WINDOW_BORDER)) {
-        float ratio[] = {0.1f, 0.35, 0.55f};
-        nk_layout_row(ctx, NK_DYNAMIC, 20 * 30, 3, ratio);
+                   NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR)) {
+        float ratio[] = {0.1f, 0.35f, 0.55f};
+        nk_layout_row(ctx, NK_DYNAMIC, WINDOW_HEIGHT, 3, ratio);
         if (nk_group_begin(ctx, "groups", 0)) {
            
           nk_group_end(ctx);
@@ -207,7 +165,7 @@ int main(int argc, char *argv[]) {
             nk_group_end(ctx);
           }
 
-          nk_layout_row_dynamic(ctx, 13 * 30, 1);
+          nk_layout_row_dynamic(ctx, WINDOW_HEIGHT - 120, 1);
           if (nk_group_begin(ctx, "messages", 0)) {
             if (first_scroll) {
               nk_group_set_scroll(ctx, "messages", 0, 13 * 30);
@@ -221,14 +179,15 @@ int main(int argc, char *argv[]) {
             nk_group_end(ctx);
           }
 
+          nk_layout_row_dynamic(ctx, 50, 1);
           if (nk_group_begin(ctx, "message_field", 0)) {
             float ratio[] = {0.9f, 0.1f};
             nk_layout_row(ctx, NK_DYNAMIC, 30, 2, ratio);
             nk_edit_string(ctx, NK_EDIT_FIELD, current_message,
-                           &actual_length, 40, nk_filter_default);
+                           &actual_length, MESSAGE_LENGTH, nk_filter_default);
             if (nk_button_label(ctx, "Send")) {
-              copy_string(approved_message, 40, current_message, 40);
-              memset(current_message, 0, 40);
+              copy_string(approved_message, MESSAGE_LENGTH, current_message, MESSAGE_LENGTH);
+              memset(current_message, 0, MESSAGE_LENGTH);
               actual_length = 0;
             }
             nk_group_end(ctx);
@@ -236,52 +195,13 @@ int main(int argc, char *argv[]) {
           nk_group_end(ctx);
         }
 
-        enum { EASY, HARD };
-        static int op = EASY;
-        static int property = 20;
-
-        nk_layout_row_static(ctx, 30, 80, 1);
-        if (nk_button_label(ctx, "button"))
-          printf("button pressed!\n");
-        nk_layout_row_dynamic(ctx, 30, 2);
-        if (nk_option_label(ctx, "easy", op == EASY))
-          op = EASY;
-        if (nk_option_label(ctx, "hard", op == HARD))
-          op = HARD;
-        nk_layout_row_dynamic(ctx, 22, 1);
-        nk_property_int(ctx, "Compression:", 0, &property, 100, 10, 1);
-
-        nk_layout_row_dynamic(ctx, 20, 1);
-        nk_label(ctx, "background:", NK_TEXT_LEFT);
-        nk_layout_row_dynamic(ctx, 25, 1);
-        if (nk_combo_begin_color(ctx, nk_rgb_cf(bg),
-                                 nk_vec2(nk_widget_width(ctx), 400))) {
-          nk_layout_row_dynamic(ctx, 120, 1);
-          bg = nk_color_picker(ctx, bg, NK_RGBA);
-          nk_layout_row_dynamic(ctx, 25, 1);
-          bg.r = nk_propertyf(ctx, "#R:", 0, bg.r, 1.0f, 0.01f, 0.005f);
-          bg.g = nk_propertyf(ctx, "#G:", 0, bg.g, 1.0f, 0.01f, 0.005f);
-          bg.b = nk_propertyf(ctx, "#B:", 0, bg.b, 1.0f, 0.01f, 0.005f);
-          bg.a = nk_propertyf(ctx, "#A:", 0, bg.a, 1.0f, 0.01f, 0.005f);
-          nk_combo_end(ctx);
-        }
+        /* nk_layout_row_dynamic(ctx, 25, 1); */
+        /* if (nk_combo_begin_color(ctx, nk_rgb_cf(bg), */
+        /*                          nk_vec2(20, 20))) { */
+        /*   nk_combo_end(ctx); */
+        /* } */
       }
       nk_end(ctx);
-
-/* -------------- EXAMPLES ---------------- */
-#ifdef INCLUDE_CALCULATOR
-    calculator(ctx);
-#endif
-#ifdef INCLUDE_CANVAS
-    canvas(ctx);
-#endif
-#ifdef INCLUDE_OVERVIEW
-    overview(ctx);
-#endif
-#ifdef INCLUDE_NODE_EDITOR
-    node_editor(ctx);
-#endif
-    /* ----------------------------------------- */
 
     /* Draw */
     SDL_GetWindowSize(win, &win_width, &win_height);

@@ -30,6 +30,7 @@
 #define MAX_ELEMENT_MEMORY 128 * 1024
 
 #define MESSAGE_LENGTH 128
+#define USER_NAME_LENGTH 32
 
 void message_widget(struct nk_context *ctx, char *user_name, char *message) {
   nk_label(ctx, user_name, NK_TEXT_LEFT);
@@ -42,6 +43,37 @@ void copy_string(char *dest, int dest_len, char *src, int src_len) {
     dest[i] = src[i];
   }
 }
+
+void get_users(char *user_names[USER_NAME_LENGTH], int count) {
+  static int user_id = 1;
+  for (int i = 0; i < count; ++i) {
+      snprintf(user_names[i], USER_NAME_LENGTH, "skbd_user#%d", user_id++);
+  }
+}
+
+struct Group {
+  int id;
+  int *user_ids;
+  int user_count;
+};
+
+struct User {
+  int id;
+  char user_name[USER_NAME_LENGTH];
+  int *friend_ids;
+  int friend_count;
+  int *group_ids;
+  int group_count;
+};
+
+struct Message {
+  int id;
+  int from_user_id;
+  int to_user_id;
+  char contents[MESSAGE_LENGTH];
+};
+
+static struct User users[40];
 
 int main(int argc, char *argv[]) {
   /* Platform */
@@ -148,8 +180,11 @@ int main(int argc, char *argv[]) {
         }
         if (nk_group_begin(ctx, "users", 0)) {
           nk_layout_row_dynamic(ctx, 30, 1);
-          for (int i = 0; i < 5; ++i) {
-            if (nk_button_label(ctx, users[i])) {
+          int possible_users_to_display = WINDOW_HEIGHT / 30;
+          char *user_names[possible_users_to_display];
+          get_users(user_names, possible_users_to_display);
+          for (int i = 0; i < possible_users_to_display; ++i) {
+            if (nk_button_label(ctx, user_names[i])) {
               current_user = i;
               first_scroll = 1;
             }

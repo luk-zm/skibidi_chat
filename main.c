@@ -25,12 +25,14 @@
 
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 800
+#define possible_users_to_display WINDOW_HEIGHT / 30
 
 #define MAX_VERTEX_MEMORY 512 * 1024
 #define MAX_ELEMENT_MEMORY 128 * 1024
 
-#define MESSAGE_LENGTH 128
+#define MESSAGE_LENGTH 256
 #define USER_NAME_LENGTH 32
+#define PASSWORD_LENGTH 128
 
 void message_widget(struct nk_context *ctx, char *user_name, char *message) {
   nk_label(ctx, user_name, NK_TEXT_LEFT);
@@ -44,7 +46,7 @@ void copy_string(char *dest, int dest_len, char *src, int src_len) {
   }
 }
 
-void get_users(char *user_names[USER_NAME_LENGTH], int count) {
+void get_users(char user_names[possible_users_to_display][USER_NAME_LENGTH], int count) {
   static int user_id = 1;
   for (int i = 0; i < count; ++i) {
       snprintf(user_names[i], USER_NAME_LENGTH, "skbd_user#%d", user_id++);
@@ -53,17 +55,18 @@ void get_users(char *user_names[USER_NAME_LENGTH], int count) {
 
 struct Group {
   int id;
-  int *user_ids;
   int user_count;
+  int *user_ids;
 };
 
 struct User {
   int id;
   char user_name[USER_NAME_LENGTH];
-  int *friend_ids;
   int friend_count;
-  int *group_ids;
+  int *friend_ids;
   int group_count;
+  int *group_ids;
+  char password[PASSWORD_LENGTH];
 };
 
 struct Message {
@@ -73,7 +76,51 @@ struct Message {
   char contents[MESSAGE_LENGTH];
 };
 
+enum MAIN_VIEW {
+  MAIN_VIEW_LOGIN,
+  MAIN_VIEW_DASHBOARD
+};
+
+static struct User test_user = { 0, "user", 0, NULL, 0, NULL, "password" };
+
 static struct User users[40];
+
+int string_compare(char *string1, int len1, char *string2, int len2) {
+  int len = len1 < len2 ? len1 : len2;
+  for (int i = 0; i < len; ++i) {
+    if (string1[i] < string2[i]) {
+      return 1;
+    } else if (string1[i] > string2[i]) {
+      return -1;
+    }
+  }
+  if (len1 > len2) {
+    return -1;
+  } else if (len1 < len2) {
+    return 1;
+  }
+  return 0;
+}
+
+typedef struct AuthResult {
+  int was_successful;
+  struct User data;
+} AuthResult;
+
+AuthResult authenticate(char user_name[USER_NAME_LENGTH], char password[PASSWORD_LENGTH]) {
+  AuthResult result;
+  result.was_successful = 0;
+  for (int i = 0; i < 40; ++i) {
+    if ((string_compare(user_name, USER_NAME_LENGTH, users[i].user_name, USER_NAME_LENGTH) == 0) &&
+        (string_compare(password, PASSWORD_LENGTH, users[i].password, PASSWORD_LENGTH) == 0))
+    {
+      result.was_successful = 1;
+      result.data = users[i];
+      break;
+    }
+  }
+  return result;
+}
 
 int main(int argc, char *argv[]) {
   /* Platform */
@@ -141,20 +188,38 @@ int main(int argc, char *argv[]) {
 
     bg.r = 0.10f, bg.g = 0.18f, bg.b = 0.24f, bg.a = 1.0f;
 
-    char users[10][20];
+
+
     for (int i = 0; i < 10; ++i) {
-      snprintf(users[i], 20, "skbd_user#%d", i + 1);
+      snprintf(users[i].user_name, USER_NAME_LENGTH, "skbd_user#%d", i + 1);
     }
+
+    for (int i = 0; i < 10; ++i) {
+      snprintf(users[i].password, PASSWORD_LENGTH, "skbd_password#%d", i + 1);
+    }
+
+    users[10] = test_user;
 
     char user_messages[10][MESSAGE_LENGTH];
     for (int i = 0; i < 10; ++i) {
-      snprintf(user_messages[i], MESSAGE_LENGTH, "%s msg#%d", users[i], i + 1);
+      snprintf(user_messages[i], MESSAGE_LENGTH, "%s msg#%d", users[i].user_name, i + 1);
     }
 
     char current_message[MESSAGE_LENGTH];
     int actual_length = 0;
     
     char approved_message[MESSAGE_LENGTH];
+
+    enum MAIN_VIEW current_view = MAIN_VIEW_LOGIN;
+
+    char current_user_name[USER_NAME_LENGTH] = {0};
+    int current_user_name_len = 0;
+    char password[PASSWORD_LENGTH] = {0};
+    int password_len = 0;
+    int is_first_try = 1;
+    int is_login_success = 0;
+
+    struct User logged_in_user;
 
     while (running) {
       /* Input */
@@ -169,74 +234,105 @@ int main(int argc, char *argv[]) {
       nk_input_end(ctx);
 
       /* GUI */
-      if (nk_begin(ctx, "skibidi main window",
-                   nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
-                   NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR)) {
-        float ratio[] = {0.1f, 0.35f, 0.55f};
-        nk_layout_row(ctx, NK_DYNAMIC, WINDOW_HEIGHT, 3, ratio);
-        if (nk_group_begin(ctx, "groups", 0)) {
-           
-          nk_group_end(ctx);
-        }
-        if (nk_group_begin(ctx, "users", 0)) {
-          nk_layout_row_dynamic(ctx, 30, 1);
-          int possible_users_to_display = WINDOW_HEIGHT / 30;
-          char *user_names[possible_users_to_display];
-          get_users(user_names, possible_users_to_display);
-          for (int i = 0; i < possible_users_to_display; ++i) {
-            if (nk_button_label(ctx, user_names[i])) {
-              current_user = i;
-              first_scroll = 1;
-            }
-          }
-          nk_text(ctx, current_message, actual_length, NK_TEXT_LEFT);
-          nk_group_end(ctx);
-        }
-        if (nk_group_begin(ctx, "messages panel", NK_WINDOW_NO_SCROLLBAR)) {
-          nk_layout_row_dynamic(ctx, 50, 1);
-          if (nk_group_begin(ctx, "user header", NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
-            nk_layout_row_dynamic(ctx, 50, 1);
-            nk_label(ctx, users[current_user], NK_TEXT_LEFT);
-            nk_group_end(ctx);
-          }
+      if (current_view == MAIN_VIEW_LOGIN) {
+        int center_x = WINDOW_WIDTH / 2;
+        int center_y = WINDOW_HEIGHT / 2;
+        int login_width = 200;
+        int login_height = 120;
+        if (nk_begin(ctx, "skibidi login",
+              nk_rect(center_x - login_width / 2, center_y - login_height / 2,
+                login_width, login_height),
+              NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR)) {
+          nk_layout_row_dynamic(ctx, 30, 2);
 
-          nk_layout_row_dynamic(ctx, WINDOW_HEIGHT - 120, 1);
-          if (nk_group_begin(ctx, "messages", 0)) {
-            if (first_scroll) {
-              nk_group_set_scroll(ctx, "messages", 0, 13 * 30);
-              first_scroll = 0;
-            }
-            nk_layout_row_dynamic(ctx, 30, 1);
-            for (int i = 0; i < 10; ++i) {
-              message_widget(ctx, users[current_user],
-                             user_messages[current_user]);
-            }
-            nk_group_end(ctx);
-          }
+          nk_label(ctx, "Login", NK_TEXT_LEFT);
+          nk_edit_string(ctx, NK_EDIT_FIELD, current_user_name, &current_user_name_len,
+                          USER_NAME_LENGTH, nk_filter_default);
 
-          nk_layout_row_dynamic(ctx, 50, 1);
-          if (nk_group_begin(ctx, "message_field", 0)) {
-            float ratio[] = {0.9f, 0.1f};
-            nk_layout_row(ctx, NK_DYNAMIC, 30, 2, ratio);
-            nk_edit_string(ctx, NK_EDIT_FIELD, current_message,
-                           &actual_length, MESSAGE_LENGTH, nk_filter_default);
-            if (nk_button_label(ctx, "Send")) {
-              copy_string(approved_message, MESSAGE_LENGTH, current_message, MESSAGE_LENGTH);
-              memset(current_message, 0, MESSAGE_LENGTH);
-              actual_length = 0;
+          nk_label(ctx, "Password", NK_TEXT_LEFT);
+          nk_edit_string(ctx, NK_EDIT_FIELD, password, &password_len,
+                          128, nk_filter_default);
+          if (nk_button_label(ctx, "Login")) {
+            is_first_try = 0;
+            AuthResult result = authenticate(current_user_name, password);;
+            is_login_success = result.was_successful;
+            if (is_login_success) {
+              current_view = MAIN_VIEW_DASHBOARD;
+              logged_in_user = result.data;
             }
-            nk_group_end(ctx);
           }
-          nk_group_end(ctx);
+          if (nk_button_label(ctx, "Sign Up")) {
+          }
+          if (!is_login_success && !is_first_try) {
+            nk_label_colored(ctx, "Wrong credentials, try again.", NK_TEXT_LEFT, nk_rgb(255, 0, 0));
+          }
         }
-
-        /* nk_layout_row_dynamic(ctx, 25, 1); */
-        /* if (nk_combo_begin_color(ctx, nk_rgb_cf(bg), */
-        /*                          nk_vec2(20, 20))) { */
-        /*   nk_combo_end(ctx); */
-        /* } */
+        nk_end(ctx);
       }
-      nk_end(ctx);
+      else if (current_view == MAIN_VIEW_DASHBOARD) {
+        if (nk_begin(ctx, "skibidi main window",
+                     nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
+                     NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR)) {
+          float ratio[] = {0.1f, 0.35f, 0.55f};
+          nk_layout_row(ctx, NK_DYNAMIC, WINDOW_HEIGHT, 3, ratio);
+          if (nk_group_begin(ctx, "groups", 0)) {
+             
+            nk_group_end(ctx);
+          }
+          if (nk_group_begin(ctx, "users", 0)) {
+            nk_layout_row_dynamic(ctx, 30, 1);
+            char user_names[possible_users_to_display][USER_NAME_LENGTH];
+            get_users(user_names, possible_users_to_display);
+            for (int i = 0; i < possible_users_to_display; ++i) {
+              if (nk_button_label(ctx, user_names[i])) {
+                current_user = i;
+                first_scroll = 1;
+              }
+            }
+            nk_text(ctx, current_message, actual_length, NK_TEXT_LEFT);
+            nk_group_end(ctx);
+          }
+          if (nk_group_begin(ctx, "messages panel", NK_WINDOW_NO_SCROLLBAR)) {
+            nk_layout_row_dynamic(ctx, 50, 1);
+            if (nk_group_begin(ctx, "user header", NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
+              nk_layout_row_dynamic(ctx, 50, 1);
+              nk_label(ctx, users[current_user].user_name, NK_TEXT_LEFT);
+              nk_group_end(ctx);
+            }
+
+            nk_layout_row_dynamic(ctx, WINDOW_HEIGHT - 120, 1);
+            if (nk_group_begin(ctx, "messages", 0)) {
+              if (first_scroll) {
+                nk_group_set_scroll(ctx, "messages", 0, 13 * 30);
+                first_scroll = 0;
+              }
+              nk_layout_row_dynamic(ctx, 30, 1);
+              for (int i = 0; i < 10; ++i) {
+                message_widget(ctx, users[current_user].user_name,
+                               user_messages[current_user]);
+              }
+              nk_group_end(ctx);
+            }
+
+            nk_layout_row_dynamic(ctx, 50, 1);
+            if (nk_group_begin(ctx, "message_field", 0)) {
+              float ratio[] = {0.9f, 0.1f};
+              nk_layout_row(ctx, NK_DYNAMIC, 30, 2, ratio);
+              nk_edit_string(ctx, NK_EDIT_FIELD, current_message,
+                             &actual_length, MESSAGE_LENGTH, nk_filter_default);
+              if (nk_button_label(ctx, "Send")) {
+                copy_string(approved_message, MESSAGE_LENGTH, current_message, MESSAGE_LENGTH);
+                memset(current_message, 0, MESSAGE_LENGTH);
+                actual_length = 0;
+              }
+              nk_group_end(ctx);
+            }
+            nk_group_end(ctx);
+          }
+        }
+
+        nk_end(ctx);
+      }
 
     /* Draw */
     SDL_GetWindowSize(win, &win_width, &win_height);

@@ -47,27 +47,98 @@ void copy_string(char *dest, int dest_len, char *src, int src_len) {
 }
 
 void get_users(char user_names[possible_users_to_display][USER_NAME_LENGTH], int count) {
-  static int user_id = 1;
+  int user_id = 1;
   for (int i = 0; i < count; ++i) {
       snprintf(user_names[i], USER_NAME_LENGTH, "skbd_user#%d", user_id++);
   }
 }
 
-struct Group {
+#define GROUP_NAME_LENGTH 128
+
+typedef struct Group {
   int id;
   int user_count;
-  int *user_ids;
-};
+  char name[GROUP_NAME_LENGTH];
+} Group;
+
+static Group groups[100];
+static int group_empty_index;
+
+int create_group(char name[GROUP_NAME_LENGTH]) {
+  if (group_empty_index >= 100) {
+    return 0;
+  }
+  groups[group_empty_index].id = group_empty_index;
+  copy_string(groups[group_empty_index].name, GROUP_NAME_LENGTH, name, GROUP_NAME_LENGTH);
+  ++group_empty_index;
+  return 1;
+}
+
+typedef struct GroupUsers {
+  int group_id;
+  int user_id;
+} GroupUsers;
+
+static GroupUsers group_indexed_list[40 * 100];
 
 struct User {
   int id;
-  char user_name[USER_NAME_LENGTH];
   int friend_count;
-  int *friend_ids;
   int group_count;
-  int *group_ids;
+  char user_name[USER_NAME_LENGTH];
   char password[PASSWORD_LENGTH];
 };
+
+typedef struct ClientSideUser {
+  int id;
+  char user_name[USER_NAME_LENGTH];
+} ClientSideUser;
+
+#define MAX_USERS 40
+
+static struct User users[MAX_USERS];
+
+typedef struct UserFriends {
+  int user1_id;
+  int user2_id;
+} UserFriends;
+
+#define MAX_FRIENDS_PER_USER 40
+#define MAX_FRIENDS_SYSTEM MAX_FRIENDS_PER_USER * MAX_USERS
+
+static UserFriends users_friends[MAX_FRIENDS_SYSTEM];
+static int user_friends_empty_index;
+
+int add_friend(int user1_id, int user2_id) {
+  if (users[user1_id].friend_count >= MAX_FRIENDS_PER_USER ||
+      users[user2_id].friend_count >= MAX_FRIENDS_PER_USER ||
+      user_friends_empty_index >= (MAX_FRIENDS_PER_USER * MAX_USERS))
+    return 0;
+
+  users_friends[user_friends_empty_index].user1_id = user1_id;
+  users_friends[user_friends_empty_index].user2_id = user2_id;
+
+  ++user_friends_empty_index;
+  ++users[user1_id].friend_count;
+  ++users[user2_id].friend_count;
+
+  return 1;
+}
+
+// friends needs to be able to hold all ClintSideUser friends in memory
+int get_friends(int user_id, ClientSideUser *friends) {
+  int current_friend_index = 0;
+  for (int i = 0; i < MAX_FRIENDS_SYSTEM; ++i) {
+    if (users_friends[i].user1_id == user_id) {
+      friends[current_friend_index].id = users_friends[i].user2_id;
+      copy_string(friends[current_friend_index].user_name, USER_NAME_LENGTH,
+                  users[users_friends[i].user2_id].user_name, USER_NAME_LENGTH);
+      ++current_friend_index;
+    }
+  }
+  return 1;
+}
+
 
 struct Message {
   int id;
@@ -81,9 +152,8 @@ enum MAIN_VIEW {
   MAIN_VIEW_DASHBOARD
 };
 
-static struct User test_user = { 0, "user", 0, NULL, 0, NULL, "password" };
-
-static struct User users[40];
+static struct User test_user = { 10, 0, 0, "user", "password" };
+static struct User test_user2 = { 11, 0, 0, "user2", "password" };
 
 int string_compare(char *string1, int len1, char *string2, int len2) {
   int len = len1 < len2 ? len1 : len2;
@@ -191,14 +261,13 @@ int main(int argc, char *argv[]) {
 
 
     for (int i = 0; i < 10; ++i) {
+      users[i].id = i;
       snprintf(users[i].user_name, USER_NAME_LENGTH, "skbd_user#%d", i + 1);
-    }
-
-    for (int i = 0; i < 10; ++i) {
       snprintf(users[i].password, PASSWORD_LENGTH, "skbd_password#%d", i + 1);
     }
 
     users[10] = test_user;
+    users[11] = test_user2;
 
     char user_messages[10][MESSAGE_LENGTH];
     for (int i = 0; i < 10; ++i) {
@@ -220,6 +289,8 @@ int main(int argc, char *argv[]) {
     int is_login_success = 0;
 
     struct User logged_in_user;
+    ClientSideUser *friends;
+    add_friend(10, 11);
 
     while (running) {
       /* Input */
@@ -238,7 +309,7 @@ int main(int argc, char *argv[]) {
         int center_x = WINDOW_WIDTH / 2;
         int center_y = WINDOW_HEIGHT / 2;
         int login_width = 200;
-        int login_height = 120;
+        int login_height = 200;
         if (nk_begin(ctx, "skibidi login",
               nk_rect(center_x - login_width / 2, center_y - login_height / 2,
                 login_width, login_height),
@@ -257,13 +328,17 @@ int main(int argc, char *argv[]) {
             AuthResult result = authenticate(current_user_name, password);;
             is_login_success = result.was_successful;
             if (is_login_success) {
-              current_view = MAIN_VIEW_DASHBOARD;
               logged_in_user = result.data;
+              friends = (ClientSideUser *)malloc(sizeof(ClientSideUser) * logged_in_user.friend_count);
+              int is_data_retrieval_success = get_friends(logged_in_user.id, friends);
+              if (is_data_retrieval_success)
+                current_view = MAIN_VIEW_DASHBOARD;
             }
           }
           if (nk_button_label(ctx, "Sign Up")) {
           }
           if (!is_login_success && !is_first_try) {
+            nk_layout_row_dynamic(ctx, 30, 1);
             nk_label_colored(ctx, "Wrong credentials, try again.", NK_TEXT_LEFT, nk_rgb(255, 0, 0));
           }
         }
@@ -279,16 +354,15 @@ int main(int argc, char *argv[]) {
              
             nk_group_end(ctx);
           }
-          if (nk_group_begin(ctx, "users", 0)) {
+          if (nk_group_begin(ctx, "friends", 0)) {
             nk_layout_row_dynamic(ctx, 30, 1);
-            char user_names[possible_users_to_display][USER_NAME_LENGTH];
-            get_users(user_names, possible_users_to_display);
-            for (int i = 0; i < possible_users_to_display; ++i) {
-              if (nk_button_label(ctx, user_names[i])) {
+            for (int i = 0; i < logged_in_user.friend_count; ++i) {
+              if (nk_button_label(ctx, friends[i].user_name)) {
                 current_user = i;
                 first_scroll = 1;
               }
             }
+            // DEBUG
             nk_text(ctx, current_message, actual_length, NK_TEXT_LEFT);
             nk_group_end(ctx);
           }
@@ -296,7 +370,7 @@ int main(int argc, char *argv[]) {
             nk_layout_row_dynamic(ctx, 50, 1);
             if (nk_group_begin(ctx, "user header", NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
               nk_layout_row_dynamic(ctx, 50, 1);
-              nk_label(ctx, users[current_user].user_name, NK_TEXT_LEFT);
+              nk_label(ctx, friends[current_user].user_name, NK_TEXT_LEFT);
               nk_group_end(ctx);
             }
 
@@ -349,6 +423,7 @@ int main(int argc, char *argv[]) {
   }
 
 cleanup:
+  free(friends);
   nk_sdl_shutdown();
   SDL_GL_DeleteContext(glContext);
   SDL_DestroyWindow(win);

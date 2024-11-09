@@ -1,5 +1,5 @@
 # Install
-BIN = demo
+BIN = skibidi-chat
 
 # Flags
 CFLAGS += -g -std=c99 -Wall -Wextra -pedantic # -O2
@@ -7,16 +7,11 @@ CFLAGS += -g -std=c99 -Wall -Wextra -pedantic # -O2
 SRC = main.c
 OBJ = $(SRC:.c=.o)
 
-ifeq ($(OS),Windows_NT)
-BIN := $(BIN).exe
-LIBS = -lmingw32 -lSDL2main -lSDL2 -lopengl32 -lm -lGLU32 -lGLEW32
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	LIBS = -lSDL2 -framework OpenGL -lm -lGLEW
 else
-	UNAME_S := $(shell uname -s)
-	ifeq ($(UNAME_S),Darwin)
-		LIBS = -lSDL2 -framework OpenGL -lm -lGLEW
-	else
-		LIBS = -lSDL2 -lGL -lm -lGLU -lGLEW
-	endif
+	LIBS = -lSDL2 -lGL -lm -lGLU -lGLEW
 endif
 
 $(BIN):

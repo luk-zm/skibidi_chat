@@ -39,27 +39,17 @@ void message_widget(struct nk_context *ctx, char *user_name, char *message) {
   nk_label(ctx, message, NK_TEXT_LEFT);
 }
 
-int compare_string(char *string1, int len1, char *string2, int len2) {
-  int len = len1 < len2 ? len1 : len2;
-  for (int i = 0; i < len; ++i) {
-    if (string1[i] < string2[i]) {
-      return 1;
-    } else if (string1[i] > string2[i]) {
-      return -1;
-    }
-  }
-  if (len1 > len2) {
-    return -1;
-  } else if (len1 < len2) {
-    return 1;
-  }
-  return 0;
-}
-
 void copy_string(char *dest, int dest_len, char *src, int src_len) {
   int len = dest_len > src_len ? src_len : dest_len;
   for (int i = 0; i < len; ++i) {
     dest[i] = src[i];
+  }
+}
+
+void get_users(char user_names[possible_users_to_display][USER_NAME_LENGTH], int count) {
+  int user_id = 1;
+  for (int i = 0; i < count; ++i) {
+      snprintf(user_names[i], USER_NAME_LENGTH, "skbd_user#%d", user_id++);
   }
 }
 
@@ -89,78 +79,24 @@ typedef struct GroupUsers {
   int user_id;
 } GroupUsers;
 
-typedef struct User {
+static GroupUsers group_indexed_list[40 * 100];
+
+struct User {
   int id;
   int friend_count;
   int group_count;
   char user_name[USER_NAME_LENGTH];
   char password[PASSWORD_LENGTH];
-} User;
+};
 
 typedef struct ClientSideUser {
   int id;
   char user_name[USER_NAME_LENGTH];
 } ClientSideUser;
 
-enum CREATE_USER_STATUS {
-  CREATE_USER_SUCCESS,
-  CREATE_USER_ALREADY_EXISTS,
-  CREATE_USER_USER_LIMIT
-};
-
 #define MAX_USERS 40
 
 static struct User users[MAX_USERS];
-static int users_empty_index;
-
-int request_create_user(char user_name[USER_NAME_LENGTH], char password[PASSWORD_LENGTH]) {
-  if (users_empty_index == MAX_USERS)
-    return CREATE_USER_USER_LIMIT;
-  for (int i = 0; i < users_empty_index; ++i) {
-    if (compare_string(user_name, USER_NAME_LENGTH, users[i].user_name, USER_NAME_LENGTH) == 0)
-      return CREATE_USER_ALREADY_EXISTS;
-  }
-  users[users_empty_index].id = users_empty_index;
-  copy_string(users[users_empty_index].user_name, USER_NAME_LENGTH,
-              user_name, USER_NAME_LENGTH);
-  copy_string(users[users_empty_index].password, PASSWORD_LENGTH,
-              password, PASSWORD_LENGTH);
-  ++users_empty_index;
-  return CREATE_USER_SUCCESS;
-}
-
-int request_create_user_varlen(char user_name[], int user_name_len,
-                               char password[], int password_len) {
-  if (users_empty_index == MAX_USERS)
-    return CREATE_USER_USER_LIMIT;
-  for (int i = 0; i < users_empty_index; ++i) {
-    if (compare_string(user_name, user_name_len, users[i].user_name, USER_NAME_LENGTH) == 0)
-      return CREATE_USER_ALREADY_EXISTS;
-  }
-  users[users_empty_index].id = users_empty_index;
-  copy_string(users[users_empty_index].user_name, USER_NAME_LENGTH,
-              user_name, user_name_len);
-  copy_string(users[users_empty_index].password, PASSWORD_LENGTH,
-              password, password_len);
-  ++users_empty_index;
-  return CREATE_USER_SUCCESS;
-}
-
-int request_create_user_terminated(char user_name[], char password[]) {
-  if (users_empty_index == MAX_USERS)
-    return CREATE_USER_USER_LIMIT;
-  for (int i = 0; i < users_empty_index; ++i) {
-    if (compare_string(user_name, strlen(user_name), users[i].user_name, USER_NAME_LENGTH) == 0)
-      return CREATE_USER_ALREADY_EXISTS;
-  }
-  users[users_empty_index].id = users_empty_index;
-  copy_string(users[users_empty_index].user_name, USER_NAME_LENGTH,
-              user_name, strlen(user_name));
-  copy_string(users[users_empty_index].password, PASSWORD_LENGTH,
-              password, strlen(password));
-  ++users_empty_index;
-  return CREATE_USER_SUCCESS;
-}
 
 typedef struct UserFriends {
   int user1_id;
@@ -171,30 +107,32 @@ typedef struct UserFriends {
 #define MAX_FRIENDS_SYSTEM MAX_FRIENDS_PER_USER * MAX_USERS
 
 static UserFriends users_friends[MAX_FRIENDS_SYSTEM];
-static int users_friends_empty_index;
+static int user_friends_empty_index;
 
+/**
+* Adds friend
+* @return 1 or 0
+*/
 int add_friend(int user1_id, int user2_id) {
   if (users[user1_id].friend_count >= MAX_FRIENDS_PER_USER ||
       users[user2_id].friend_count >= MAX_FRIENDS_PER_USER ||
-      users_friends_empty_index >= (MAX_FRIENDS_PER_USER * MAX_USERS))
+      user_friends_empty_index >= (MAX_FRIENDS_PER_USER * MAX_USERS))
     return 0;
 
-  users_friends[users_friends_empty_index].user1_id = user1_id;
-  users_friends[users_friends_empty_index].user2_id = user2_id;
+  users_friends[user_friends_empty_index].user1_id = user1_id;
+  users_friends[user_friends_empty_index].user2_id = user2_id;
 
-  ++users_friends_empty_index;
-
-  users_friends[users_friends_empty_index].user1_id = user2_id;
-  users_friends[users_friends_empty_index].user2_id = user1_id;
-
-  ++users_friends_empty_index;
-
+  ++user_friends_empty_index;
   ++users[user1_id].friend_count;
   ++users[user2_id].friend_count;
 
   return 1;
 }
 
+/**
+* Gets friend
+* @return 1
+*/
 // friends needs to be able to hold all ClintSideUser friends in memory
 int get_friends(int user_id, ClientSideUser *friends) {
   int current_friend_index = 0;
@@ -219,22 +157,44 @@ struct Message {
 
 enum MAIN_VIEW {
   MAIN_VIEW_LOGIN,
-  MAIN_VIEW_SIGNUP,
   MAIN_VIEW_DASHBOARD
 };
+
+static struct User test_user = { 10, 0, 0, "user", "password" };
+static struct User test_user2 = { 11, 0, 0, "user2", "password" };
+
+/**
+* Compares string
+* @return 1 , 0, or -1
+*/
+int string_compare(char *string1, int len1, char *string2, int len2) {
+  int len = len1 < len2 ? len1 : len2;
+  for (int i = 0; i < len; ++i) {
+    if (string1[i] < string2[i]) {
+      return 1;
+    } else if (string1[i] > string2[i]) {
+      return -1;
+    }
+  }
+  if (len1 > len2) {
+    return -1;
+  } else if (len1 < len2) {
+    return 1;
+  }
+  return 0;
+}
 
 typedef struct AuthResult {
   int was_successful;
   struct User data;
 } AuthResult;
 
-AuthResult authenticate(char user_name[USER_NAME_LENGTH], int user_name_len,
-                        char password[PASSWORD_LENGTH], int password_len) {
+AuthResult authenticate(char user_name[USER_NAME_LENGTH], char password[PASSWORD_LENGTH]) {
   AuthResult result;
   result.was_successful = 0;
-  for (int i = 0; i < users_empty_index; ++i) {
-    if ((compare_string(user_name, user_name_len, users[i].user_name, USER_NAME_LENGTH) == 0) &&
-        (compare_string(password, password_len, users[i].password, PASSWORD_LENGTH) == 0))
+  for (int i = 0; i < 40; ++i) {
+    if ((string_compare(user_name, USER_NAME_LENGTH, users[i].user_name, USER_NAME_LENGTH) == 0) &&
+        (string_compare(password, PASSWORD_LENGTH, users[i].password, PASSWORD_LENGTH) == 0))
     {
       result.was_successful = 1;
       result.data = users[i];
@@ -285,28 +245,24 @@ int main(int argc, char *argv[]) {
   ctx = nk_sdl_init(win);
   /* Load Fonts: if none of these are loaded a default font will be used  */
   /* Load Cursor: if you uncomment cursor loading please hide the cursor */
-  // TODO: Better font handling
-  // {
+  {
     struct nk_font_atlas *atlas;
     nk_sdl_font_stash_begin(&atlas);
     /*struct nk_font *droid = nk_font_atlas_add_from_file(atlas,
      * "../../../extra_font/DroidSans.ttf", 14, 0);*/
-    struct nk_font *roboto18 = nk_font_atlas_add_from_file(atlas,
-     "../fonts/Roboto-Regular.ttf", 18, 0);
-    struct nk_font *roboto24 = nk_font_atlas_add_from_file(atlas,
-     "../fonts/Roboto-Regular.ttf", 24, 0);
+    /*struct nk_font *roboto = nk_font_atlas_add_from_file(atlas,
+     * "../../../extra_font/Roboto-Regular.ttf", 16, 0);*/
     /*struct nk_font *future = nk_font_atlas_add_from_file(atlas,
      * "../../../extra_font/kenvector_future_thin.ttf", 13, 0);*/
-    /* struct nk_font *clean = nk_font_atlas_add_from_file(atlas, */
-    /*  "../fonts/ProggyClean.ttf", 24, 0); */
+    /*struct nk_font *clean = nk_font_atlas_add_from_file(atlas,
+     * "../../../extra_font/ProggyClean.ttf", 12, 0);*/
     /*struct nk_font *tiny = nk_font_atlas_add_from_file(atlas,
      * "../../../extra_font/ProggyTiny.ttf", 10, 0);*/
     /*struct nk_font *cousine = nk_font_atlas_add_from_file(atlas,
      * "../../../extra_font/Cousine-Regular.ttf", 13, 0);*/
     nk_sdl_font_stash_end();
   /*nk_style_load_all_cursors(ctx, atlas->cursors);*/
-    nk_style_set_font(ctx, &roboto18->handle);
-  // }
+    /*nk_style_set_font(ctx, &roboto->handle);*/}
 
     int current_user = 0;
 
@@ -315,19 +271,15 @@ int main(int argc, char *argv[]) {
     bg.r = 0.10f, bg.g = 0.18f, bg.b = 0.24f, bg.a = 1.0f;
 
 
-    FILE *database = fopen("data.db", "rb");
-    if (database) {
-      fread(users, sizeof(User), MAX_USERS, database);
-      fread(&users_empty_index, sizeof(int), 1, database);
-      fread(users_friends, sizeof(UserFriends), MAX_FRIENDS_SYSTEM, database);
-      fread(&users_friends_empty_index, sizeof(int), 1, database);
-      fclose(database);
-    }
-    else {
-      fprintf(stderr, "Couldn't open the database for reading.\n");
+
+    for (int i = 0; i < 10; ++i) {
+      users[i].id = i;
+      snprintf(users[i].user_name, USER_NAME_LENGTH, "skbd_user#%d", i + 1);
+      snprintf(users[i].password, PASSWORD_LENGTH, "skbd_password#%d", i + 1);
     }
 
-    /* add_friend(9, 10); */
+    users[10] = test_user;
+    users[11] = test_user2;
 
     char user_messages[10][MESSAGE_LENGTH];
     for (int i = 0; i < 10; ++i) {
@@ -345,15 +297,12 @@ int main(int argc, char *argv[]) {
     int current_user_name_len = 0;
     char password[PASSWORD_LENGTH] = {0};
     int password_len = 0;
-    char password_check[PASSWORD_LENGTH] = {0};
-    int password_check_len = 0;
-    int is_first_login_try = 1;
+    int is_first_try = 1;
     int is_login_success = 0;
-    int is_signup_error = 0;
-    int are_password_different = 0;
 
     struct User logged_in_user;
-    ClientSideUser *friends = NULL;
+    ClientSideUser *friends;
+    add_friend(10, 11);
 
     while (running) {
       /* Input */
@@ -387,9 +336,8 @@ int main(int argc, char *argv[]) {
           nk_edit_string(ctx, NK_EDIT_FIELD, password, &password_len,
                           128, nk_filter_default);
           if (nk_button_label(ctx, "Login")) {
-            is_first_login_try = 0;
-            AuthResult result = authenticate(current_user_name, current_user_name_len,
-                password, password_len);
+            is_first_try = 0;
+            AuthResult result = authenticate(current_user_name, password);;
             is_login_success = result.was_successful;
             if (is_login_success) {
               logged_in_user = result.data;
@@ -400,81 +348,10 @@ int main(int argc, char *argv[]) {
             }
           }
           if (nk_button_label(ctx, "Sign Up")) {
-            memset(current_user_name, 0, current_user_name_len);
-            current_user_name_len = 0;
-            memset(password, 0, password_len);
-            password_len = 0;
-            memset(password_check, 0, password_check_len);
-            password_check_len = 0;
-            current_view = MAIN_VIEW_SIGNUP;
           }
-          if (!is_login_success && !is_first_login_try) {
+          if (!is_login_success && !is_first_try) {
             nk_layout_row_dynamic(ctx, 30, 1);
             nk_label_colored(ctx, "Wrong credentials, try again.", NK_TEXT_LEFT, nk_rgb(255, 0, 0));
-          }
-        }
-        nk_end(ctx);
-      }
-      else if (current_view == MAIN_VIEW_SIGNUP) {
-        float center_x = WINDOW_WIDTH / 2.0;
-        float center_y = WINDOW_HEIGHT / 2.0;
-        float signup_width = 400;
-        float signup_height = 400;
-        if (nk_begin(ctx, "skibidi signup",
-              nk_rect(center_x - signup_width / 2, center_y - signup_height / 2,
-                signup_width, signup_height),
-              NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR)) {
-          nk_layout_row_dynamic(ctx, 30, 2);
-
-          nk_label(ctx, "Login", NK_TEXT_LEFT);
-          nk_edit_string(ctx, NK_EDIT_FIELD, current_user_name, &current_user_name_len,
-                          USER_NAME_LENGTH, nk_filter_default);
-
-          nk_label(ctx, "Password", NK_TEXT_LEFT);
-          nk_edit_string(ctx, NK_EDIT_FIELD, password, &password_len,
-                          128, nk_filter_default);
-          nk_label(ctx, "Repeat Password", NK_TEXT_LEFT);
-          nk_edit_string(ctx, NK_EDIT_FIELD, password_check, &password_check_len,
-                          128, nk_filter_default);
-          if (nk_button_label(ctx, "Sign Up")) {
-            is_first_login_try = 1;
-            if (compare_string(password, PASSWORD_LENGTH,
-                  password_check, PASSWORD_LENGTH) == 0) {
-              int error_code = request_create_user(current_user_name, password);
-              if (error_code != CREATE_USER_SUCCESS) {
-                is_signup_error = 1;
-              }
-              else {
-                memset(current_user_name, 0, current_user_name_len);
-                current_user_name_len = 0;
-                memset(password, 0, password_len);
-                password_len = 0;
-                memset(password_check, 0, password_check_len);
-                password_check_len = 0;
-                current_view = MAIN_VIEW_LOGIN;
-              }
-            }
-            else {
-              are_password_different = 1;
-            }
-          }
-          if (nk_button_label(ctx, "Cancel")) {
-            memset(current_user_name, 0, current_user_name_len);
-            current_user_name_len = 0;
-            memset(password, 0, password_len);
-            password_len = 0;
-            memset(password_check, 0, password_check_len);
-            password_check_len = 0;
-            current_view = MAIN_VIEW_LOGIN;
-          }
-          if (is_signup_error) {
-            nk_layout_row_dynamic(ctx, 30, 1);
-            // TODO: display different error messages
-            nk_label_colored(ctx, "Signup error", NK_TEXT_LEFT, nk_rgb(255, 0, 0));
-          }
-          if (are_password_different) {
-            nk_layout_row_dynamic(ctx, 30, 1);
-            nk_label_colored(ctx, "Passwords not matching", NK_TEXT_LEFT, nk_rgb(255, 0, 0));
           }
         }
         nk_end(ctx);
@@ -485,31 +362,18 @@ int main(int argc, char *argv[]) {
                      NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR)) {
           float ratio[] = {0.1f, 0.35f, 0.55f};
           nk_layout_row(ctx, NK_DYNAMIC, WINDOW_HEIGHT, 3, ratio);
-          if (nk_group_begin(ctx, "spaces", 0)) {
+          if (nk_group_begin(ctx, "groups", 0)) {
              
             nk_group_end(ctx);
           }
-          if (nk_group_begin(ctx, "chat rooms", 0)) {
+          if (nk_group_begin(ctx, "friends", 0)) {
             nk_layout_row_dynamic(ctx, 30, 1);
-            if (nk_button_label(ctx, "Find")) {
-
-            }
-            if (nk_tree_push(ctx, NK_TREE_NODE, "Friends", NK_MAXIMIZED)){
-              nk_layout_row_dynamic(ctx, 30, 1);
-              if (logged_in_user.friend_count == 0) {
-                nk_label(ctx, "No friends added yet", NK_TEXT_LEFT);
+            for (int i = 0; i < logged_in_user.friend_count; ++i) {
+              if (nk_button_label(ctx, friends[i].user_name)) {
+                current_user = i;
+                first_scroll = 1;
               }
-              else {
-                for (int i = 0; i < logged_in_user.friend_count; ++i) {
-                  if (nk_button_label(ctx, friends[i].user_name)) {
-                    current_user = i;
-                    first_scroll = 1;
-                  }
-                }
-              }
-              nk_tree_pop(ctx);
             }
-            // TODO: Add "Groups" tree
             // DEBUG
             nk_text(ctx, current_message, actual_length, NK_TEXT_LEFT);
             nk_group_end(ctx);
@@ -517,10 +381,8 @@ int main(int argc, char *argv[]) {
           if (nk_group_begin(ctx, "messages panel", NK_WINDOW_NO_SCROLLBAR)) {
             nk_layout_row_dynamic(ctx, 50, 1);
             if (nk_group_begin(ctx, "user header", NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
-              nk_style_push_font(ctx, &roboto24->handle);
               nk_layout_row_dynamic(ctx, 50, 1);
               nk_label(ctx, friends[current_user].user_name, NK_TEXT_LEFT);
-              nk_style_pop_font(ctx);
               nk_group_end(ctx);
             }
 
@@ -570,23 +432,10 @@ int main(int argc, char *argv[]) {
      * after rendering the UI. */
     nk_sdl_render(NK_ANTI_ALIASING_ON, MAX_VERTEX_MEMORY, MAX_ELEMENT_MEMORY);
     SDL_GL_SwapWindow(win);
-    }
+  }
 
 cleanup:
-  database = fopen("data.db", "wb");
-  if (database) {
-    fwrite(users, sizeof(User), MAX_USERS, database);
-    fwrite(&users_empty_index, sizeof(int), 1, database);
-    fwrite(users_friends, sizeof(UserFriends), MAX_FRIENDS_SYSTEM, database);
-    fwrite(&users_friends_empty_index, sizeof(int), 1, database);
-    fclose(database);
-  }
-  else {
-    fprintf(stderr, "Couldn't open the database for writing.\n");
-  }
-
-  if (friends)
-    free(friends);
+  free(friends);
   nk_sdl_shutdown();
   SDL_GL_DeleteContext(glContext);
   SDL_DestroyWindow(win);

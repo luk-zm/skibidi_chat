@@ -573,7 +573,9 @@ int main(int argc, char *argv[]) {
             search_users(searched_user_or_group, searched_user_or_group_len,
                          suggested_users, 10, &results_num);
             for (int i = 0; i < results_num; ++i) {
+              nk_layout_row_dynamic(ctx, 30, 2);
               nk_text(ctx, suggested_users[i].user_name, suggested_users[i].user_name_len, NK_TEXT_LEFT);
+              nk_button_label(ctx, "Invite");
             }
             nk_popup_end(ctx);
           }

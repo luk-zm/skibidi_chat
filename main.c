@@ -93,6 +93,7 @@ typedef struct GroupUsers {
 typedef struct User {
   int id;
   int friend_count;
+  int invitations_count;
   int group_count;
   char user_name[USER_NAME_LENGTH];
   int user_name_len;
@@ -100,10 +101,16 @@ typedef struct User {
   int password_len;
 } User;
 
+typedef enum USER_TYPE {
+  USER_TYPE_FRIEND,
+  USER_TYPE_INVITATION
+} USER_TYPE;
+
 typedef struct ClientSideUser {
   int id;
   char user_name[USER_NAME_LENGTH];
   int user_name_len;
+  USER_TYPE type;
 } ClientSideUser;
 
 ClientSideUser user_to_client_side(User *user) {
@@ -238,6 +245,63 @@ int add_friend(int user1_id, int user2_id) {
   return 1;
 }
 
+typedef enum INVITATION_STATUS {
+  INVITATION_SENT,
+  INVITATION_ACCEPTED,
+  INVITATION_REJECTED
+} INVITATION_STATUS;
+
+typedef struct Invitation {
+  int id;
+  int from_user_id;
+  int to_user_id;
+  INVITATION_STATUS status;
+} Invitation;
+
+#define MAX_INVITATIONS_SYSTEM 200
+static Invitation all_invitations[MAX_INVITATIONS_SYSTEM];
+static int all_invitations_empty_index;
+
+/*
+  add_invitation
+
+  0 - invite already sent
+  1 - success
+*/
+
+int add_invitation(int from_user_id, int to_user_id) {
+  for (int i = 0; i < all_invitations_empty_index; ++i) {
+    if (all_invitations[i].from_user_id == from_user_id &&
+        all_invitations[i].to_user_id == to_user_id) {
+      return 0;
+    }
+  }
+  Invitation inv;
+  inv.id = all_invitations_empty_index;
+  inv.from_user_id = from_user_id;
+  inv.to_user_id = to_user_id;
+  inv.status = INVITATION_SENT;
+  all_invitations[all_invitations_empty_index++] = inv;
+  return 1;
+}
+
+// might need to add more when there are groups
+#define MAX_FETCHED_USERS_SYSTEM MAX_INVITATIONS_SYSTEM + MAX_FRIENDS_SYSTEM
+static int fetched_users_empty_index;
+static ClientSideUser fetched_users[MAX_FETCHED_USERS_SYSTEM];
+
+ClientSideUser *get_fetched_user(int id) {
+  for (int i = 0; i < fetched_users_empty_index; ++i) {
+    if (fetched_users[i].id == id)
+      return &fetched_users[i];
+  }
+  return NULL;
+}
+
+int get_invitations(int user_id, Invitation *invitations) {
+  
+}
+
 // friends needs to be able to hold all ClintSideUser friends in memory
 int get_friends(int user_id, ClientSideUser *friends) {
   int current_friend_index = 0;
@@ -266,12 +330,15 @@ void search_users(char name[USER_NAME_LENGTH], int name_length,
   *results_num = found_index;
 }
 
-struct Message {
+typedef struct Message {
   int id;
   int from_user_id;
   int to_user_id;
   char contents[MESSAGE_LENGTH];
-};
+} Message;
+
+#define MAX_MESSAGES_SYSTEM 200
+static Message all_messages[MAX_MESSAGES_SYSTEM];
 
 enum MAIN_VIEW { MAIN_VIEW_LOGIN, MAIN_VIEW_SIGNUP, MAIN_VIEW_DASHBOARD };
 
@@ -323,7 +390,7 @@ int main(int argc, char *argv[]) {
   win = SDL_CreateWindow("Skibidi Chat", SDL_WINDOWPOS_CENTERED,
                          SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT,
                          SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN |
-                             SDL_WINDOW_ALLOW_HIGHDPI);
+                             SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE);
   glContext = SDL_GL_CreateContext(win);
   SDL_GetWindowSize(win, &win_width, &win_height);
 
@@ -378,14 +445,6 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Couldn't open the database for reading.\n");
   }
 
-  /* add_friend(9, 10); */
-
-  char user_messages[10][MESSAGE_LENGTH];
-  for (int i = 0; i < 10; ++i) {
-    snprintf(user_messages[i], MESSAGE_LENGTH, "%s msg#%d", all_users[i].user_name,
-             i + 1);
-  }
-
   char current_message[MESSAGE_LENGTH];
   int actual_length = 0;
 
@@ -424,9 +483,10 @@ int main(int argc, char *argv[]) {
     nk_input_end(ctx);
 
     /* GUI */
+    SDL_GetWindowSize(win, &win_width, &win_height);
+    float center_x = win_width * 0.5;
+    float center_y = win_height * 0.5;
     if (current_view == MAIN_VIEW_LOGIN) {
-      int center_x = WINDOW_WIDTH / 2;
-      int center_y = WINDOW_HEIGHT / 2;
       int login_width = 200;
       int login_height = 200;
       if (nk_begin(ctx, "skibidi login",
@@ -480,8 +540,6 @@ int main(int argc, char *argv[]) {
       }
       nk_end(ctx);
     } else if (current_view == MAIN_VIEW_SIGNUP) {
-      float center_x = WINDOW_WIDTH / 2.0;
-      float center_y = WINDOW_HEIGHT / 2.0;
       float signup_width = 400;
       float signup_height = 400;
       if (nk_begin(ctx, "skibidi signup",
@@ -504,8 +562,8 @@ int main(int argc, char *argv[]) {
                        PASSWORD_LENGTH, nk_filter_default);
         if (nk_button_label(ctx, "Sign Up")) {
           is_first_login_try = 1;
-          if (compare_string(password, PASSWORD_LENGTH, password_check,
-                             PASSWORD_LENGTH) == 0) {
+          if (compare_string(password, password_len, password_check,
+                             password_check_len) == 0) {
             int error_code =
                 request_create_user(current_user_name, current_user_name_len,
                                     password, password_len);
@@ -548,14 +606,12 @@ int main(int argc, char *argv[]) {
       nk_end(ctx);
     } else if (current_view == MAIN_VIEW_DASHBOARD) {
       if (nk_begin(ctx, "skibidi main window",
-                   nk_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT),
+                   nk_rect(0, 0, win_width, win_height),
                    NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
         static int display_find_popup = 0;
         if (display_find_popup) {
-          int center_x = WINDOW_WIDTH / 2;
-          int center_y = WINDOW_HEIGHT / 2;
-          int popup_width = WINDOW_WIDTH / 2;
-          int popup_height = WINDOW_HEIGHT / 2;
+          float popup_width = win_width * 0.5;
+          float popup_height = win_height * 0.5;
           struct nk_rect popup_rect = nk_rect(center_x - popup_width / 2,
                                      center_y - popup_height / 2,
                                      popup_width, popup_height);
@@ -575,7 +631,11 @@ int main(int argc, char *argv[]) {
             for (int i = 0; i < results_num; ++i) {
               nk_layout_row_dynamic(ctx, 30, 2);
               nk_text(ctx, suggested_users[i].user_name, suggested_users[i].user_name_len, NK_TEXT_LEFT);
-              nk_button_label(ctx, "Invite");
+              if (nk_button_label(ctx, "Invite")) {
+                if (!add_invitation(logged_in_user.id, suggested_users[i].id)) {
+                  fprintf(stderr, "Invitation already sent\n");
+                }
+              }
             }
             nk_popup_end(ctx);
           }
@@ -601,6 +661,26 @@ int main(int argc, char *argv[]) {
                 if (nk_button_label(ctx, friends[i].user_name)) {
                   current_user = i;
                   first_scroll = 1;
+                }
+              }
+            }
+            nk_tree_pop(ctx);
+          }
+          if (nk_tree_push(ctx, NK_TREE_NODE, "Invitations", NK_MAXIMIZED)) {
+            nk_layout_row_dynamic(ctx, 30, 1);
+            if (logged_in_user.invitations_count == 0) {
+              nk_label(ctx, "No invitations received yet", NK_TEXT_LEFT);
+            } else {
+              for (int i = 0; i < logged_in_user.invitations_count; ++i) {
+                ClientSideUser *fetched_user = get_fetched_user(all_invitations[i].id);
+                if (fetched_user) {
+                  if (nk_button_label(ctx, fetched_user->user_name)) {
+                    current_user = i;
+                    first_scroll = 1;
+                  }
+                }
+                else {
+                  nk_label(ctx, "Error: user with such ID not fetched.", NK_TEXT_LEFT);
                 }
               }
             }
@@ -632,7 +712,7 @@ int main(int argc, char *argv[]) {
               nk_layout_row_dynamic(ctx, 30, 1);
               for (int i = 0; i < 10; ++i) {
                 message_widget(ctx, all_users[current_user].user_name,
-                               user_messages[current_user]);
+                               "placeholder");
               }
               nk_group_end(ctx);
             }

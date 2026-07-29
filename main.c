@@ -483,8 +483,7 @@ int main(int argc, char *argv[]) {
         nk_flags password_state = nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, password,
                                                  &password_len, PASSWORD_LENGTH, nk_filter_default);
 
-        int login_pressed = nk_button_label(ctx, "Login") || (password_state & NK_EDIT_COMMITED);
-        if (login_pressed) {
+        if (nk_button_label(ctx, "Login") || (password_state & NK_EDIT_COMMITED)) {
           is_first_login_try = 0;
           AuthResult result =
               authenticate(current_user_name, current_user_name_len, password, password_len);
@@ -533,9 +532,10 @@ int main(int argc, char *argv[]) {
         nk_edit_string(ctx, NK_EDIT_FIELD, password, &password_len, PASSWORD_LENGTH,
                        nk_filter_default);
         nk_label(ctx, "Repeat Password", NK_TEXT_LEFT);
-        nk_edit_string(ctx, NK_EDIT_FIELD, password_check, &password_check_len, PASSWORD_LENGTH,
-                       nk_filter_default);
-        if (nk_button_label(ctx, "Sign Up")) {
+        nk_flags repeat_password_state =
+            nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, password_check,
+                           &password_check_len, PASSWORD_LENGTH, nk_filter_default);
+        if (nk_button_label(ctx, "Sign Up") || (repeat_password_state & NK_EDIT_COMMITED)) {
           is_first_login_try = 1;
           if (compare_string(password, password_len, password_check, password_check_len) == 0) {
             int error_code = request_create_user(current_user_name, current_user_name_len, password,

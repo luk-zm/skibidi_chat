@@ -347,6 +347,12 @@ AuthResult authenticate(char user_name[USER_NAME_LENGTH], int user_name_len,
   return result;
 }
 
+typedef enum {
+  LOGIN_NONE,
+  LOGIN_USERNAME,
+  LOGIN_PASSWORD,
+} LoginScreen;
+
 int main(int argc, char *argv[]) {
   /* Platform */
   SDL_Window *win;
@@ -451,6 +457,11 @@ int main(int argc, char *argv[]) {
   struct User logged_in_user;
   ClientSideUser *friends = NULL;
 
+  // TODO: Temporary measure, maybe wrap in a UIState struct or something like that
+  LoginScreen field_current = LOGIN_NONE;
+  // This one doesn't need to persist but it's conceptually close to field_current
+  int focus_request = 0;
+
   while (running) {
     /* Input */
     SDL_Event evt;
@@ -470,18 +481,55 @@ int main(int argc, char *argv[]) {
       int login_width = 200;
       int login_height = 200;
       if (nk_begin(ctx, "skibidi login",
-                   nk_rect(center_x - login_width / 2, center_y - login_height / 2, login_width,
+                   nk_rect(center_x - login_width / 2.0, center_y - login_height / 2.0, login_width,
                            login_height),
                    NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR)) {
         nk_layout_row_dynamic(ctx, 30, 2);
 
+        // No need for Shift+Tab as there are only 2 fields
+        if (nk_input_is_key_pressed(&ctx->input, NK_KEY_TAB)) {
+          switch (field_current) {
+          case LOGIN_NONE: {
+            field_current = LOGIN_USERNAME;
+            break;
+          }
+          case LOGIN_USERNAME: {
+            field_current = LOGIN_PASSWORD;
+            break;
+          }
+          case LOGIN_PASSWORD: {
+            field_current = LOGIN_USERNAME;
+            break;
+          }
+          default: {
+            field_current = LOGIN_NONE;
+            break;
+          }
+          }
+
+          focus_request = 1;
+        }
+
         nk_label(ctx, "Login", NK_TEXT_LEFT);
-        nk_edit_string(ctx, NK_EDIT_FIELD, current_user_name, &current_user_name_len,
-                       USER_NAME_LENGTH, nk_filter_default);
+        if (focus_request && field_current == LOGIN_USERNAME) {
+          nk_edit_focus(ctx, NK_EDIT_FIELD);
+          focus_request = 0;
+        }
+        nk_flags username_state =
+            nk_edit_string(ctx, NK_EDIT_FIELD, current_user_name, &current_user_name_len,
+                           USER_NAME_LENGTH, nk_filter_default);
 
         nk_label(ctx, "Password", NK_TEXT_LEFT);
+        if (focus_request && field_current == LOGIN_PASSWORD) {
+          nk_edit_focus(ctx, NK_EDIT_FIELD);
+          focus_request = 0;
+        }
         nk_flags password_state = nk_edit_string(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, password,
                                                  &password_len, PASSWORD_LENGTH, nk_filter_default);
+
+        if (username_state & NK_EDIT_ACTIVE) field_current = LOGIN_USERNAME;
+        else if (password_state & NK_EDIT_ACTIVE) field_current = LOGIN_PASSWORD;
+        else field_current = LOGIN_NONE;
 
         if (nk_button_label(ctx, "Login") || (password_state & NK_EDIT_COMMITED)) {
           is_first_login_try = 0;
